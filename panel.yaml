@@ -102,7 +102,7 @@ ota:
   - platform: esphome
 
 wifi:
-  ssid: "DNTD"
+  ssid: "wifi name"
   password: "wifipassword"
   ap:
     ssid: "Weather Panel"
