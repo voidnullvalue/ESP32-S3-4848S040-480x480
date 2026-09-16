@@ -21,7 +21,7 @@ jobs:
       - name: Install simulator dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsdl2-dev build-essential xvfb xdotool scrot jq curl
+          sudo apt-get install -y libsdl2-dev build-essential xvfb xdotool scrot jq curl imagemagick
           python -m pip install --upgrade pip
           python -m pip install "esphome==2026.8.2"
 
