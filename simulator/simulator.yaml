@@ -1,4 +1,5 @@
 # GENERATED DOCUMENTATION SIMULATOR
+# Rendered by GitHub Actions using ESPHome's host + SDL backend.
 # This runs the same ESPHome/LVGL widget tree used by panel.yaml on the host SDL backend.
 # Fixture weather values are deterministic; map/radar images are downloaded by the CI renderer.
 
