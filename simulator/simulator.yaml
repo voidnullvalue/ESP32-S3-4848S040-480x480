@@ -1,0 +1,648 @@
+# GENERATED DOCUMENTATION SIMULATOR
+# This runs the same ESPHome/LVGL widget tree used by panel.yaml on the host SDL backend.
+# Fixture weather values are deterministic; map/radar images are downloaded by the CI renderer.
+
+esphome:
+  name: weather-panel-sim
+  friendly_name: Weather Panel Simulator
+
+host:
+
+logger:
+
+display:
+  - platform: sdl
+    id: my_display
+    dimensions:
+      width: 480
+      height: 480
+    window_options:
+      position:
+        x: 0
+        y: 0
+      borderless: true
+      resizable: false
+
+touchscreen:
+  - platform: sdl
+    id: my_touchscreen
+    display: my_display
+
+font:
+  - file: "gfonts://Roboto"
+    id: roboto10
+    size: 10
+  - file: "gfonts://Roboto"
+    id: roboto12
+    size: 12
+  - file: "gfonts://Roboto"
+    id: roboto14
+    size: 14
+  - file: "gfonts://Roboto"
+    id: roboto16
+    size: 16
+  - file: "gfonts://Roboto"
+    id: roboto18
+    size: 18
+  - file: "gfonts://Roboto"
+    id: roboto22
+    size: 22
+  - file: "gfonts://Roboto"
+    id: roboto30
+    size: 30
+  - file: "gfonts://Roboto"
+    id: roboto42
+    size: 42
+
+image:
+  - platform: file
+    id: basemap
+    file: "assets/basemap.png"
+    type: RGB565
+    transparency: opaque
+    resize: 480x480
+
+  - platform: file
+    id: radar_frame_0
+    file: "assets/radar0.png"
+    type: RGB565
+    transparency: alpha_channel
+    resize: 480x480
+  - platform: file
+    id: radar_frame_1
+    file: "assets/radar1.png"
+    type: RGB565
+    transparency: alpha_channel
+    resize: 480x480
+  - platform: file
+    id: radar_frame_2
+    file: "assets/radar2.png"
+    type: RGB565
+    transparency: alpha_channel
+    resize: 480x480
+  - platform: file
+    id: radar_frame_3
+    file: "assets/radar3.png"
+    type: RGB565
+    transparency: alpha_channel
+    resize: 480x480
+
+lvgl:
+  id: lvgl_comp
+  displays:
+    - my_display
+  touchscreens:
+    - touchscreen_id: my_touchscreen
+
+  theme:
+    button:
+      radius: 8
+      bg_color: 0x222831
+      text_color: 0xFFFFFF
+      text_font: roboto14
+      shadow_width: 0
+
+  page_wrap: true
+  pages:
+    # -------------------------------------------------------------------------
+    # RADAR / WEATHER HUD
+    # -------------------------------------------------------------------------
+    - id: radar_page
+      skip: false
+      bg_color: 0x05080C
+      bg_opa: cover
+      widgets:
+        - image:
+            src: basemap
+            x: 0
+            y: 0
+
+        - animimg:
+            id: radar_anim
+            src:
+              - radar_frame_0
+              - radar_frame_1
+              - radar_frame_2
+              - radar_frame_3
+            x: 0
+            y: 0
+            duration: 2400ms
+            repeat_count: forever
+
+        # Home is EXACTLY at the coordinate-center of the basemap/radar image.
+        # Yellow remains obvious against the dark basemap and blue radar layer.
+        - obj:
+            x: 233
+            y: 233
+            width: 14
+            height: 14
+            radius: 7
+            bg_color: 0xFFD54A
+            bg_opa: cover
+            border_color: 0x000000
+            border_width: 2
+            clickable: false
+            scrollable: false
+            scrollbar_mode: "OFF"
+
+        # Top HUD. Explicitly disable scrolling on every HUD container: LVGL
+        # objects are scrollable by default, which caused the visible scrollbars.
+        - obj:
+            x: 8
+            y: 8
+            width: 464
+            height: 72
+            radius: 10
+            bg_color: 0x0A1017
+            bg_opa: 90%
+            border_color: 0x4B5866
+            border_width: 1
+            pad_all: 0
+            clickable: false
+            scrollable: false
+            scrollbar_mode: "OFF"
+            widgets:
+              - label:
+                  id: radar_temp_label
+                  x: 10
+                  y: 7
+                  width: 88
+                  height: 39
+                  text: "84 F"
+                  text_font: roboto30
+                  text_color: 0xFFFFFF
+                  long_mode: clip
+              - label:
+                  id: radar_condition_label
+                  x: 98
+                  y: 9
+                  width: 202
+                  height: 20
+                  text: "Partly cloudy"
+                  text_font: roboto14
+                  text_color: 0xFFFFFF
+                  long_mode: dot
+              - label:
+                  id: radar_feels_label
+                  x: 98
+                  y: 35
+                  width: 202
+                  height: 18
+                  text: "Feels 87 F"
+                  text_font: roboto12
+                  text_color: 0xD6DCE2
+                  long_mode: clip
+              - label:
+                  id: radar_aqi_label
+                  x: 302
+                  y: 10
+                  width: 148
+                  height: 18
+                  text: "AQI 42 GOOD"
+                  text_font: roboto12
+                  text_color: 0xFFFFFF
+                  text_align: right
+                  long_mode: clip
+              - label:
+                  id: clock_label
+                  x: 302
+                  y: 36
+                  width: 148
+                  height: 18
+                  text: "6:45 PM"
+                  text_font: roboto12
+                  text_color: 0xD6DCE2
+                  text_align: right
+                  long_mode: clip
+
+        # Left wind HUD
+        - obj:
+            x: 8
+            y: 100
+            width: 118
+            height: 72
+            radius: 8
+            bg_color: 0x0A1017
+            bg_opa: 88%
+            border_color: 0x4B5866
+            border_width: 1
+            pad_all: 0
+            clickable: false
+            scrollable: false
+            scrollbar_mode: "OFF"
+            widgets:
+              - label:
+                  x: 8
+                  y: 5
+                  width: 100
+                  height: 15
+                  text: "WIND"
+                  text_font: roboto10
+                  text_color: 0xAEB9C5
+                  long_mode: clip
+              - label:
+                  id: radar_wind_label
+                  x: 8
+                  y: 22
+                  width: 100
+                  height: 42
+                  text: "SSE 12 mph\\nG 21"
+                  text_font: roboto14
+                  text_color: 0xFFFFFF
+                  long_mode: clip
+
+        # Right RH/dew/pressure HUD
+        - obj:
+            x: 352
+            y: 100
+            width: 120
+            height: 84
+            radius: 8
+            bg_color: 0x0A1017
+            bg_opa: 88%
+            border_color: 0x4B5866
+            border_width: 1
+            pad_all: 0
+            clickable: false
+            scrollable: false
+            scrollbar_mode: "OFF"
+            widgets:
+              - label:
+                  id: radar_rh_label
+                  x: 8
+                  y: 8
+                  width: 104
+                  height: 66
+                  text: "RH --\nDEW --\nPRESS --"
+                  text_font: roboto12
+                  text_color: 0xFFFFFF
+                  long_mode: clip
+
+        # Alert badge -- appears only when NWS returns active alerts.
+        - button:
+            id: alert_badge
+            hidden: true
+            x: 145
+            y: 91
+            width: 190
+            height: 38
+            radius: 8
+            bg_color: 0xA11F1F
+            border_color: 0xFFB0B0
+            border_width: 1
+            scrollable: false
+            scrollbar_mode: "OFF"
+            on_click:
+              - lvgl.page.show: alerts_page
+            widgets:
+              - label:
+                  id: alert_badge_label
+                  align: center
+                  width: 174
+                  text: "ALERTS"
+                  text_font: roboto14
+                  text_color: 0xFFFFFF
+                  text_align: center
+                  long_mode: clip
+
+        - label:
+            id: radar_loading_label
+            hidden: true
+            x: 135
+            y: 205
+            width: 210
+            height: 34
+            text: "LOADING RADAR..."
+            text_font: roboto12
+            text_align: center
+            text_color: 0xFFFFFF
+            bg_color: 0x0A1017
+            bg_opa: 92%
+            border_color: 0x4B5866
+            border_width: 1
+            pad_all: 8
+            radius: 8
+            long_mode: clip
+
+        # Bottom metric strip. Smaller fonts and fixed label heights prevent
+        # content from escaping its box; scrolling is disabled on the container.
+        - obj:
+            x: 8
+            y: 362
+            width: 464
+            height: 64
+            radius: 10
+            bg_color: 0x0A1017
+            bg_opa: 90%
+            border_color: 0x4B5866
+            border_width: 1
+            pad_all: 0
+            clickable: false
+            scrollable: false
+            scrollbar_mode: "OFF"
+            widgets:
+              - label:
+                  id: radar_bottom_label
+                  x: 8
+                  y: 7
+                  width: 276
+                  height: 17
+                  text: "RAIN 30%  0.00 in   UV 2.4"
+                  text_font: roboto12
+                  text_color: 0xFFFFFF
+                  long_mode: clip
+              - label:
+                  id: radar_time_label
+                  x: 286
+                  y: 7
+                  width: 168
+                  height: 17
+                  text: "RADAR 6:40 PM"
+                  text_font: roboto10
+                  text_color: 0xFFFFFF
+                  text_align: right
+                  long_mode: clip
+              - label:
+                  id: date_label
+                  x: 8
+                  y: 36
+                  width: 128
+                  height: 15
+                  text: "Tue Sep 15"
+                  text_font: roboto10
+                  text_color: 0xBFC8D1
+                  long_mode: clip
+              - label:
+                  x: 138
+                  y: 36
+                  width: 316
+                  height: 15
+                  text: "Open-Meteo | NWS | RainViewer"
+                  text_font: roboto10
+                  text_color: 0xBFC8D1
+                  text_align: right
+                  long_mode: clip
+
+    # -------------------------------------------------------------------------
+    # NWS FORECAST
+    # -------------------------------------------------------------------------
+    - id: forecast_page
+      skip: false
+      bg_color: 0x0B0F14
+      bg_opa: cover
+      widgets:
+        - label:
+            x: 14
+            y: 10
+            text: "NWS FORECAST"
+            text_font: roboto22
+            text_color: 0xFFFFFF
+        - label:
+            id: fc_0
+            x: 12
+            y: 45
+            width: 456
+            height: 56
+            text: "Tonight | 72 F | Mostly clear. S wind 5-10 mph."
+            text_font: roboto12
+            text_color: 0xFFFFFF
+            bg_color: 0x18202A
+            bg_opa: cover
+            pad_all: 8
+            radius: 7
+            long_mode: wrap
+            scrollable: false
+            scrollbar_mode: "OFF"
+        - label:
+            id: fc_1
+            x: 12
+            y: 106
+            width: 456
+            height: 56
+            text: "Wednesday | 91 F | Sunny. South wind around 10 mph."
+            text_font: roboto12
+            text_color: 0xFFFFFF
+            bg_color: 0x18202A
+            bg_opa: cover
+            pad_all: 8
+            radius: 7
+            long_mode: wrap
+            scrollable: false
+            scrollbar_mode: "OFF"
+        - label:
+            id: fc_2
+            x: 12
+            y: 167
+            width: 456
+            height: 56
+            text: "Wednesday Night | 73 F | Mostly clear."
+            text_font: roboto12
+            text_color: 0xFFFFFF
+            bg_color: 0x18202A
+            bg_opa: cover
+            pad_all: 8
+            radius: 7
+            long_mode: wrap
+            scrollable: false
+            scrollbar_mode: "OFF"
+        - label:
+            id: fc_3
+            x: 12
+            y: 228
+            width: 456
+            height: 56
+            text: "Thursday | 93 F | Sunny and hot."
+            text_font: roboto12
+            text_color: 0xFFFFFF
+            bg_color: 0x18202A
+            bg_opa: cover
+            pad_all: 8
+            radius: 7
+            long_mode: wrap
+            scrollable: false
+            scrollbar_mode: "OFF"
+        - label:
+            id: fc_4
+            x: 12
+            y: 289
+            width: 456
+            height: 56
+            text: "Thursday Night | 74 F | Partly cloudy."
+            text_font: roboto12
+            text_color: 0xFFFFFF
+            bg_color: 0x18202A
+            bg_opa: cover
+            pad_all: 8
+            radius: 7
+            long_mode: wrap
+            scrollable: false
+            scrollbar_mode: "OFF"
+        - label:
+            id: fc_5
+            x: 12
+            y: 350
+            width: 456
+            height: 56
+            text: "Friday | 90 F | 30% chance of thunderstorms."
+            text_font: roboto12
+            text_color: 0xFFFFFF
+            bg_color: 0x18202A
+            bg_opa: cover
+            pad_all: 8
+            radius: 7
+            long_mode: wrap
+            scrollable: false
+            scrollbar_mode: "OFF"
+
+    # -------------------------------------------------------------------------
+    # CONDITIONS / AIR QUALITY
+    # -------------------------------------------------------------------------
+    - id: conditions_page
+      skip: false
+      bg_color: 0x0B0F14
+      bg_opa: cover
+      widgets:
+        - label:
+            x: 14
+            y: 10
+            text: "CURRENT CONDITIONS"
+            text_font: roboto22
+            text_color: 0xFFFFFF
+        - label:
+            id: conditions_primary_label
+            x: 14
+            y: 50
+            width: 452
+            height: 155
+            text: "Temperature     84 F\\nFeels like      87 F\\nHumidity        58%\\nDew point       68 F\\nWind            SSE 12 mph\\nGust            21 mph\\nPressure        29.92 inHg"
+            text_font: roboto16
+            text_color: 0xFFFFFF
+            long_mode: wrap
+            scrollable: false
+            scrollbar_mode: "OFF"
+        - label:
+            id: conditions_precip_label
+            x: 14
+            y: 210
+            width: 452
+            height: 112
+            text: "Rain chance     30%\\nPrecip now      0.00 in\\nRain now        0.00 in\\nCloud cover     35%\\nUV index        2.4"
+            text_font: roboto16
+            text_color: 0xFFFFFF
+            long_mode: wrap
+            scrollable: false
+            scrollbar_mode: "OFF"
+        - label:
+            id: conditions_air_label
+            x: 14
+            y: 324
+            width: 452
+            height: 100
+            text: "US AQI          42  Good\\nPM2.5           8.2 ug/m3\\nOzone           67.0 ug/m3\\nWeather update  18:40\\nAir update      18:30"
+            text_font: roboto14
+            text_color: 0xD6DCE2
+            long_mode: wrap
+            scrollable: false
+            scrollbar_mode: "OFF"
+
+    # -------------------------------------------------------------------------
+    # NWS ALERTS
+    # -------------------------------------------------------------------------
+    - id: alerts_page
+      skip: false
+      bg_color: 0x0B0F14
+      bg_opa: cover
+      widgets:
+        - label:
+            id: alerts_title
+            x: 14
+            y: 10
+            width: 452
+            text: "NO ACTIVE NWS ALERTS"
+            text_font: roboto22
+            text_color: 0xFFFFFF
+        - label:
+            id: alert_event_label
+            x: 14
+            y: 51
+            width: 452
+            text: "All clear for this point."
+            text_font: roboto18
+            text_color: 0xFFFFFF
+            long_mode: wrap
+            scrollable: false
+            scrollbar_mode: "OFF"
+        - label:
+            id: alert_headline_label
+            x: 14
+            y: 89
+            width: 452
+            height: 70
+            text: ""
+            text_font: roboto14
+            text_color: 0xD6DCE2
+            long_mode: wrap
+            scrollable: false
+            scrollbar_mode: "OFF"
+        - label:
+            id: alert_description_label
+            x: 14
+            y: 165
+            width: 452
+            height: 254
+            text: ""
+            text_font: roboto14
+            text_color: 0xFFFFFF
+            long_mode: wrap
+            scrollable: false
+            scrollbar_mode: "OFF"
+
+  # Global navigation always remains above all pages.
+  top_layer:
+    widgets:
+      - obj:
+          x: 0
+          y: 432
+          width: 480
+          height: 48
+          bg_color: 0x080B0F
+          bg_opa: cover
+          border_width: 0
+          clickable: false
+      - button:
+          x: 3
+          y: 435
+          width: 115
+          height: 42
+          on_click:
+            - lvgl.page.show: radar_page
+          widgets:
+            - label: { align: center, text: "RADAR", text_font: roboto12 }
+      - button:
+          x: 121
+          y: 435
+          width: 115
+          height: 42
+          on_click:
+            - lvgl.page.show: forecast_page
+          widgets:
+            - label: { align: center, text: "FORECAST", text_font: roboto12 }
+      - button:
+          x: 239
+          y: 435
+          width: 115
+          height: 42
+          on_click:
+            - lvgl.page.show: conditions_page
+          widgets:
+            - label: { align: center, text: "CONDITIONS", text_font: roboto12 }
+      - button:
+          x: 357
+          y: 435
+          width: 120
+          height: 42
+          on_click:
+            - lvgl.page.show: alerts_page
+          widgets:
+            - label: { align: center, text: "ALERTS", text_font: roboto12 }
+

@@ -1,0 +1,97 @@
+name: Render LVGL screenshots
+
+on:
+  push:
+    paths:
+      - "simulator/**"
+      - ".github/workflows/render-screenshots.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install simulator dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev build-essential xvfb xdotool scrot jq curl
+          python -m pip install --upgrade pip
+          python -m pip install "esphome==2026.8.2"
+
+      - name: Fetch real RainViewer map/radar assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p simulator/assets
+          LAT=39.0997
+          LON=-94.5786
+          Z=7
+          curl -fL --retry 4 "https://maps.rainviewer.com/styles/m2_dark/static/${LON},${LAT},${Z}/512x512.png" -o simulator/assets/basemap.png
+          META="$(curl -fsSL --retry 4 https://api.rainviewer.com/public/weather-maps.json)"
+          HOST="$(jq -r '.host' <<<"$META")"
+          mapfile -t PATHS < <(jq -r '.radar.past[-4:][] | .path' <<<"$META")
+          test "${#PATHS[@]}" -eq 4
+          for i in 0 1 2 3; do
+            curl -fL --retry 4 "${HOST}${PATHS[$i]}/512/${Z}/${LAT}/${LON}/2/1_0.png" -o "simulator/assets/radar${i}.png"
+          done
+          file simulator/assets/*.png
+
+      - name: Validate and compile host simulator
+        run: |
+          esphome config simulator/simulator.yaml
+          esphome compile simulator/simulator.yaml
+
+      - name: Render 480x480 screenshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p docs/screenshots
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 480x480x24 >/tmp/xvfb.log 2>&1 &
+          XVFB_PID=$!
+          trap 'kill $XVFB_PID 2>/dev/null || true' EXIT
+          sleep 2
+
+          PROGRAM=".esphome/build/weather-panel-sim/.pioenvs/weather-panel-sim/program"
+          test -x "$PROGRAM"
+          SDL_VIDEODRIVER=x11 "$PROGRAM" >/tmp/weather-panel-sim.log 2>&1 &
+          SIM_PID=$!
+          trap 'kill $SIM_PID $XVFB_PID 2>/dev/null || true' EXIT
+
+          sleep 4
+
+          # Root is exactly 480x480 and the SDL window is borderless at 0,0.
+          scrot docs/screenshots/radar.png
+
+          # Bottom navigation button centers from panel.yaml.
+          xdotool mousemove 178 456 click 1
+          sleep 1
+          scrot docs/screenshots/forecast.png
+
+          xdotool mousemove 296 456 click 1
+          sleep 1
+          scrot docs/screenshots/conditions.png
+
+          xdotool mousemove 417 456 click 1
+          sleep 1
+          scrot docs/screenshots/alerts.png
+
+          identify docs/screenshots/*.png
+          for f in docs/screenshots/*.png; do
+            test "$(identify -format '%wx%h' "$f")" = "480x480"
+          done
+
+      - name: Upload simulator screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: lvgl-screenshots
+          path: docs/screenshots/*.png
+          if-no-files-found: error
+          retention-days: 7
