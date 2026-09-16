@@ -6,6 +6,19 @@
 esphome:
   name: weather-panel-sim
   friendly_name: Weather Panel Simulator
+  on_boot:
+    priority: -100
+    then:
+      # Give the SDL display and large decoded map/radar images time to settle,
+      # then rotate pages on a deterministic schedule for CI screenshots.
+      - delay: 8s
+      - lvgl.page.show: radar_page
+      - delay: 4s
+      - lvgl.page.show: forecast_page
+      - delay: 4s
+      - lvgl.page.show: conditions_page
+      - delay: 4s
+      - lvgl.page.show: alerts_page
 
 host:
 

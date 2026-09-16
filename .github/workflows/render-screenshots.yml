@@ -65,22 +65,18 @@ jobs:
           SIM_PID=$!
           trap 'kill $SIM_PID $XVFB_PID 2>/dev/null || true' EXIT
 
-          sleep 4
-
-          # Root is exactly 480x480 and the SDL window is borderless at 0,0.
+          # simulator.yaml rotates pages itself after startup. This avoids
+          # synthesizing input and captures the exact LVGL page state.
+          sleep 10
           scrot docs/screenshots/radar.png
 
-          # Bottom navigation button centers from panel.yaml.
-          xdotool mousemove 178 456 click 1
-          sleep 1
+          sleep 4
           scrot docs/screenshots/forecast.png
 
-          xdotool mousemove 296 456 click 1
-          sleep 1
+          sleep 4
           scrot docs/screenshots/conditions.png
 
-          xdotool mousemove 417 456 click 1
-          sleep 1
+          sleep 4
           scrot docs/screenshots/alerts.png
 
           identify docs/screenshots/*.png
