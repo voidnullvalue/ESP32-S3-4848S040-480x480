@@ -260,7 +260,9 @@ lvgl:
                   y: 22
                   width: 100
                   height: 42
-                  text: |-\n                    SSE 12 mph\n                    G 21
+                  text: |-
+                    SSE 12 mph
+                    G 21
                   text_font: roboto14
                   text_color: 0xFFFFFF
                   long_mode: clip
@@ -287,7 +289,10 @@ lvgl:
                   y: 8
                   width: 104
                   height: 66
-                  text: |-\n                    RH 58%\n                    DEW 68 F\n                    29.92 in
+                  text: |-
+                    RH 58%
+                    DEW 68 F
+                    29.92 in
                   text_font: roboto12
                   text_color: 0xFFFFFF
                   long_mode: clip
@@ -528,7 +533,14 @@ lvgl:
             y: 50
             width: 452
             height: 155
-            text: |-\n              Temperature     84 F\n              Feels like      87 F\n              Humidity        58%\n              Dew point       68 F\n              Wind            SSE 12 mph\n              Gust            21 mph\n              Pressure        29.92 inHg
+            text: |-
+              Temperature     84 F
+              Feels like      87 F
+              Humidity        58%
+              Dew point       68 F
+              Wind            SSE 12 mph
+              Gust            21 mph
+              Pressure        29.92 inHg
             text_font: roboto16
             text_color: 0xFFFFFF
             long_mode: wrap
@@ -540,7 +552,12 @@ lvgl:
             y: 210
             width: 452
             height: 112
-            text: |-\n              Rain chance     30%\n              Precip now      0.00 in\n              Rain now        0.00 in\n              Cloud cover     35%\n              UV index        2.4
+            text: |-
+              Rain chance     30%
+              Precip now      0.00 in
+              Rain now        0.00 in
+              Cloud cover     35%
+              UV index        2.4
             text_font: roboto16
             text_color: 0xFFFFFF
             long_mode: wrap
@@ -552,7 +569,12 @@ lvgl:
             y: 324
             width: 452
             height: 100
-            text: |-\n              US AQI          42  Good\n              PM2.5           8.2 ug/m3\n              Ozone           67.0 ug/m3\n              Weather update  18:40\n              Air update      18:30
+            text: |-
+              US AQI          42  Good
+              PM2.5           8.2 ug/m3
+              Ozone           67.0 ug/m3
+              Weather update  18:40
+              Air update      18:30
             text_font: roboto14
             text_color: 0xD6DCE2
             long_mode: wrap
