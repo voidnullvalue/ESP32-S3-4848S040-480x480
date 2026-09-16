@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   render:
@@ -83,6 +83,18 @@ jobs:
           for f in docs/screenshots/*.png; do
             test "$(identify -format '%wx%h' "$f")" = "480x480"
           done
+
+      - name: Commit rendered screenshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/screenshots/*.png
+          if ! git diff --cached --quiet; then
+            git commit -m "Update LVGL simulator screenshots"
+            git push
+          fi
 
       - name: Upload simulator screenshots
         uses: actions/upload-artifact@v4
