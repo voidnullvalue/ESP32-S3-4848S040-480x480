@@ -59,7 +59,7 @@ jobs:
           trap 'kill $XVFB_PID 2>/dev/null || true' EXIT
           sleep 2
 
-          PROGRAM=".esphome/build/weather-panel-sim/.pioenvs/weather-panel-sim/program"
+          PROGRAM="simulator/.esphome/build/weather-panel-sim/.pioenvs/weather-panel-sim/program"
           test -x "$PROGRAM"
           SDL_VIDEODRIVER=x11 "$PROGRAM" >/tmp/weather-panel-sim.log 2>&1 &
           SIM_PID=$!
