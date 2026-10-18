@@ -12,6 +12,8 @@ substitutions:
   radar_zoom: "7"
   basemap_zoom: "7"
   radar_color: "2"
+  # Keep the Frigate server address out of public source control.
+  frigate_host: !secret frigate_host
 
 esphome:
   name: panel
@@ -89,7 +91,7 @@ captive_portal:
 
 mqtt:
   id: mqtt_client
-  broker: 192.168.88.14
+  broker: !secret mqtt_broker
   port: 1883
   topic_prefix: WeatherPanel
   discovery: false
@@ -159,6 +161,10 @@ globals:
   - { id: radar_url_2, type: std::string, restore_value: no, initial_value: '""' }
   - { id: radar_url_3, type: std::string, restore_value: no, initial_value: '""' }
   - { id: radar_stamp, type: std::string, restore_value: no, initial_value: '"RADAR --"' }
+  # A single JPEG image buffer is shared across all five cameras.
+  - { id: camera_index, type: int, restore_value: no, initial_value: '2' }
+  - { id: camera_request_index, type: int, restore_value: no, initial_value: '-1' }
+  - { id: camera_fetching, type: bool, restore_value: no, initial_value: 'false' }
   # Four bits set only after all four successful image decodes.
   - { id: radar_loaded_mask, type: uint8_t, restore_value: no, initial_value: '0' }
 
@@ -233,10 +239,95 @@ online_image:
       - logger.log: "Radar frame 3 failed"
       - script.execute: finish_radar
 
+  # Frigate 0.18 latest-frame API; no direct go2rtc port or FFmpeg transcode needed.
+  - id: camera_frame
+    url: "http://${frigate_host}:5000/api/backyard/latest.jpg"
+    format: JPEG
+    type: RGB565
+    transparency: opaque
+    resize: 448x336
+    update_interval: never
+    buffer_size: 16384
+    on_download_finished:
+      - lambda: id(camera_fetching) = false;
+      - if:
+          condition:
+            and:
+              - lvgl.page.is_showing: cameras_page
+              - lambda: return id(camera_request_index) == id(camera_index);
+          then:
+            - lvgl.image.update:
+                id: camera_image
+                src: camera_frame
+            - lvgl.widget.show: camera_image
+            - lvgl.label.update:
+                id: camera_status
+                text: "FRAME UPDATED"
+    on_error:
+      - lambda: id(camera_fetching) = false;
+      - if:
+          condition:
+            and:
+              - lvgl.page.is_showing: cameras_page
+              - lambda: return id(camera_request_index) == id(camera_index);
+          then:
+            - lvgl.label.update:
+                id: camera_status
+                text: "CAMERA UNAVAILABLE"
+
 # -----------------------------------------------------------------------------
 # UI updates
 # -----------------------------------------------------------------------------
 script:
+  # One in-flight Frigate JPEG request at a time; no background camera polling.
+  - id: refresh_camera_frame
+    mode: single
+    then:
+      - if:
+          condition:
+            and:
+              - lvgl.page.is_showing: cameras_page
+              - lambda: return !id(camera_fetching);
+          then:
+            - lambda: |-
+                id(camera_fetching) = true;
+                id(camera_request_index) = id(camera_index);
+            - online_image.set_url:
+                id: camera_frame
+                update: false
+                url: !lambda |-
+                  static const char *const names[5] = {
+                    "camera_07c3",
+                    "camera_106874268",
+                    "backyard",
+                    "cam_utilities_indoor",
+                    "usb_webcam"
+                  };
+                  return std::string("http://${frigate_host}:5000/api/")
+                         + names[id(camera_request_index)] + "/latest.jpg";
+            - component.update: camera_frame
+
+  - id: camera_selection_changed
+    mode: restart
+    then:
+      - lvgl.label.update:
+          id: camera_title
+          text: !lambda |-
+            static const char *const labels[5] = {
+              "CAMERA 07C3", "CAMERA 106874268", "BACKYARD",
+              "UTILITIES INDOOR", "USB WEBCAM"
+            };
+            return std::string(labels[id(camera_index)]);
+      - lvgl.label.update:
+          id: camera_counter
+          text: !lambda |-
+            return std::to_string(id(camera_index) + 1) + " / 5";
+      - lvgl.label.update:
+          id: camera_status
+          text: "LOADING CAMERA..."
+      - lvgl.widget.hide: camera_image
+      - script.execute: refresh_camera_frame
+
   - id: update_clock
     mode: restart
     then:
@@ -796,6 +887,9 @@ script:
 
 # Periodic refresh (unchanged).
 interval:
+  - interval: 1s
+    then:
+      - script.execute: refresh_camera_frame
   - interval: 10min
     then:
       - script.execute: refresh_current_weather
@@ -1302,6 +1396,69 @@ lvgl:
             scrollable: false
             scrollbar_mode: "OFF"
 
+    - id: cameras_page
+      skip: false
+      bg_color: 0x0B0F14
+      bg_opa: cover
+      widgets:
+        - label:
+            id: camera_title
+            x: 16
+            y: 11
+            width: 360
+            height: 30
+            text: "BACKYARD"
+            text_font: roboto22
+            text_color: 0xFFFFFF
+            long_mode: dot
+        # Keep the source hidden until the first successful JPEG download.
+        - image:
+            id: camera_image
+            src: basemap
+            x: 16
+            y: 47
+            hidden: true
+        - label:
+            id: camera_status
+            x: 16
+            y: 360
+            width: 448
+            height: 22
+            text: "LOADING CAMERA..."
+            text_font: roboto12
+            text_color: 0xC1CBD4
+            text_align: center
+        - button:
+            x: 16
+            y: 386
+            width: 132
+            height: 41
+            on_click:
+              - lambda: id(camera_index) = (id(camera_index) + 4) % 5;
+              - script.execute: camera_selection_changed
+            widgets:
+              - label: { align: center, text: "PREVIOUS", text_font: roboto14 }
+        - label:
+            id: camera_counter
+            x: 200
+            y: 398
+            width: 80
+            height: 19
+            text: "3 / 5"
+            text_font: roboto14
+            text_color: 0xFFFFFF
+            text_align: center
+        - button:
+            x: 332
+            y: 386
+            width: 132
+            height: 41
+            on_click:
+              - lambda: id(camera_index) = (id(camera_index) + 1) % 5;
+              - script.execute: camera_selection_changed
+            widgets:
+              - label: { align: center, text: "NEXT", text_font: roboto14 }
+
   top_layer:
     widgets:
       - obj:
@@ -1314,38 +1471,48 @@ lvgl:
           border_width: 0
           clickable: false
       - button:
-          x: 3
+          x: 2
           y: 435
-          width: 115
+          width: 93
           height: 42
           on_click:
             - lvgl.page.show: radar_page
           widgets:
-            - label: { align: center, text: "RADAR", text_font: roboto12 }
+            - label: { align: center, text: "RADAR", text_font: roboto10 }
       - button:
-          x: 121
+          x: 98
           y: 435
-          width: 115
+          width: 93
           height: 42
           on_click:
             - lvgl.page.show: forecast_page
           widgets:
-            - label: { align: center, text: "FORECAST", text_font: roboto12 }
+            - label: { align: center, text: "FORECAST", text_font: roboto10 }
       - button:
-          x: 239
+          x: 194
           y: 435
-          width: 115
+          width: 93
           height: 42
           on_click:
             - lvgl.page.show: conditions_page
           widgets:
-            - label: { align: center, text: "CONDITIONS", text_font: roboto12 }
+            - label: { align: center, text: "CONDITIONS", text_font: roboto10 }
       - button:
-          x: 357
+          x: 290
           y: 435
-          width: 120
+          width: 93
           height: 42
           on_click:
             - lvgl.page.show: alerts_page
           widgets:
-            - label: { align: center, text: "ALERTS", text_font: roboto12 }
+            - label: { align: center, text: "ALERTS", text_font: roboto10 }
+      - button:
+          x: 386
+          y: 435
+          width: 93
+          height: 42
+          on_click:
+            - lvgl.page.show: cameras_page
+            - script.execute: camera_selection_changed
+          widgets:
+            - label: { align: center, text: "CAMERAS", text_font: roboto10 }

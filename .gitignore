@@ -1,0 +1,5 @@
+# LAN endpoints and private ESPHome credentials
+secrets.yaml
+secrets.*.yaml
+!secrets.example.yaml
+.esphome/
