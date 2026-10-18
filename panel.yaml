@@ -1,33 +1,20 @@
 # Standalone ESPHome weather + animated radar panel
-# Target hardware: ESP32-S3 + ST7701S 480x480 + GT911 touch
-#
-# Demo location only — replace these substitutions with your own location before use
-#
-# Runtime dependencies: Internet only.
-# No Home Assistant, MQTT broker, Pi, proxy, or other always-on computer required.
-#
-# IMPORTANT ALIGNMENT NOTE:
-# RainViewer radar coordinate images and the RainViewer m2 basemap both use
-# Web Mercator zoom semantics. The m2 TileJSON advertises tileSize=512, and the
-# radar API's size=512 controls output resolution, not a different geographic
-# zoom. Therefore radar and basemap MUST use the same zoom here.
-# Verified z7 / 512px footprint around this center:
-# W -98.024625, E -95.212125, S 31.706828, N 34.068283.
+# ESP32-S3 / ST7701S 480x480 / GT911
+# No Home Assistant required. MQTT is optional telemetry/control.
+# Radar frames are attached to LVGL only after all four have decoded.
 
 substitutions:
-  latitude: "39.0997"       # DEMO: Kansas City, MO — replace
-  longitude: "-94.5786"     # DEMO: Kansas City, MO — replace
-  # NWS canonicalizes /points coordinates to 4 decimal places. Use the
-  # canonical form directly so the ESP32 does not have to follow a 301.
-  nws_latitude: "39.0997"   # DEMO — replace; 4 decimals avoids NWS canonical redirect
-  nws_longitude: "-94.5786" # DEMO — replace; 4 decimals avoids NWS canonical redirect
-  location_name: "DEMO"
+  latitude: "32.895424"
+  longitude: "-96.618375"
+  nws_latitude: "32.8954"
+  nws_longitude: "-96.6184"
+  location_name: "GARLAND"
   radar_zoom: "7"
   basemap_zoom: "7"
   radar_color: "2"
 
 esphome:
-  name: weather-panel
+  name: panel
   friendly_name: Weather Panel
   platformio_options:
     board_build.flash_mode: dio
@@ -42,17 +29,11 @@ esphome:
           condition:
             wifi.connected:
           timeout: 45s
-      # Do not start certificate-validated HTTPS until SNTP has supplied a
-      # sane wall clock. If NTP is temporarily unavailable, continue after
-      # the timeout rather than wedging the panel forever.
       - wait_until:
           condition:
             lambda: return id(panel_time).now().is_valid();
           timeout: 30s
       - delay: 1s
-
-      # Keep boot-time HTTPS requests serialized. In particular, do not start
-      # the NWS forecast request from inside the /points response callback.
       - script.execute: refresh_current_weather
       - script.wait: refresh_current_weather
       - delay: 400ms
@@ -80,10 +61,6 @@ esp32:
       CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
       CONFIG_SPIRAM_FETCH_INSTRUCTIONS: y
       CONFIG_SPIRAM_RODATA: y
-
-      # api.weather.gov requires an ECDHE-RSA-capable TLS client. Explicitly
-      # keep the relevant mbedTLS features enabled; this avoids the fatal
-      # handshake behavior seen by small mbedTLS clients against the NWS API.
       CONFIG_MBEDTLS_SSL_PROTO_TLS1_2: "y"
       CONFIG_MBEDTLS_KEY_EXCHANGE_ELLIPTIC_CURVE: "y"
       CONFIG_MBEDTLS_KEY_EXCHANGE_ECDHE_RSA: "y"
@@ -97,12 +74,12 @@ psram:
 logger:
   level: DEBUG
 
-# No api: component: this unit is intentionally independent of Home Assistant.
+# No api: this panel is intentionally independent of Home Assistant.
 ota:
   - platform: esphome
 
 wifi:
-  ssid: "wifi name"
+  ssid: "wifi networkname"
   password: "wifipassword"
   ap:
     ssid: "Weather Panel"
@@ -110,15 +87,19 @@ wifi:
 
 captive_portal:
 
-# NTP replaces the old Home Assistant time source.
+mqtt:
+  id: mqtt_client
+  broker: 192.168.88.14
+  port: 1883
+  topic_prefix: WeatherPanel
+  discovery: false
+  reboot_timeout: 0s
+
 time:
   - platform: sntp
     id: panel_time
     timezone: America/Chicago
-    servers:
-      - 0.pool.ntp.org
-      - 1.pool.ntp.org
-      - 2.pool.ntp.org
+    servers: [0.pool.ntp.org, 1.pool.ntp.org, 2.pool.ntp.org]
     on_time_sync:
       - script.execute: update_clock
     on_time:
@@ -129,185 +110,59 @@ time:
 
 http_request:
   id: http_client
-  # ESPHome applies this timeout to each DNS/connect/TLS/read operation on
-  # ESP-IDF, not to the request as a whole. NWS/Akamai can occasionally be
-  # slower than Open-Meteo, so leave comfortable headroom.
   timeout: 30s
   watchdog_timeout: 90s
   verify_ssl: true
   follow_redirects: true
-  useragent: "WeatherPanel/1.2 (ESPHome standalone display)"
+  useragent: "WeatherPanel/1.2 (ESPHome standalone display; Garland TX)"
   buffer_size_rx: 4096
   buffer_size_tx: 1024
 
 json:
 
-# -----------------------------------------------------------------------------
-# Runtime state
-# -----------------------------------------------------------------------------
+# State is volatile; fresh API data is loaded after boot.
 globals:
-  # Open-Meteo current conditions
-  - id: current_temp_f
-    type: float
-    restore_value: no
-    initial_value: 'NAN'
-  - id: feels_f
-    type: float
-    restore_value: no
-    initial_value: 'NAN'
-  - id: humidity_pct
-    type: float
-    restore_value: no
-    initial_value: 'NAN'
-  - id: dew_f
-    type: float
-    restore_value: no
-    initial_value: 'NAN'
-  - id: wind_mph
-    type: float
-    restore_value: no
-    initial_value: 'NAN'
-  - id: wind_gust_mph
-    type: float
-    restore_value: no
-    initial_value: 'NAN'
-  - id: wind_dir_deg
-    type: float
-    restore_value: no
-    initial_value: 'NAN'
-  - id: pressure_hpa
-    type: float
-    restore_value: no
-    initial_value: 'NAN'
-  - id: precip_prob_pct
-    type: float
-    restore_value: no
-    initial_value: 'NAN'
-  - id: precip_in
-    type: float
-    restore_value: no
-    initial_value: 'NAN'
-  - id: rain_in
-    type: float
-    restore_value: no
-    initial_value: 'NAN'
-  - id: cloud_pct
-    type: float
-    restore_value: no
-    initial_value: 'NAN'
-  - id: weather_code
-    type: int
-    restore_value: no
-    initial_value: '-1'
-  - id: current_condition
-    type: std::string
-    restore_value: no
-    initial_value: '"Waiting for weather"'
-  - id: current_updated
-    type: std::string
-    restore_value: no
-    initial_value: '"--"'
+  - { id: current_temp_f, type: float, restore_value: no, initial_value: 'NAN' }
+  - { id: feels_f, type: float, restore_value: no, initial_value: 'NAN' }
+  - { id: humidity_pct, type: float, restore_value: no, initial_value: 'NAN' }
+  - { id: dew_f, type: float, restore_value: no, initial_value: 'NAN' }
+  - { id: wind_mph, type: float, restore_value: no, initial_value: 'NAN' }
+  - { id: wind_gust_mph, type: float, restore_value: no, initial_value: 'NAN' }
+  - { id: wind_dir_deg, type: float, restore_value: no, initial_value: 'NAN' }
+  - { id: pressure_hpa, type: float, restore_value: no, initial_value: 'NAN' }
+  - { id: precip_prob_pct, type: float, restore_value: no, initial_value: 'NAN' }
+  - { id: precip_in, type: float, restore_value: no, initial_value: 'NAN' }
+  - { id: rain_in, type: float, restore_value: no, initial_value: 'NAN' }
+  - { id: cloud_pct, type: float, restore_value: no, initial_value: 'NAN' }
+  - { id: weather_code, type: int, restore_value: no, initial_value: '-1' }
+  - { id: current_condition, type: std::string, restore_value: no, initial_value: '"Waiting for weather"' }
+  - { id: current_updated, type: std::string, restore_value: no, initial_value: '"--"' }
+  - { id: us_aqi, type: float, restore_value: no, initial_value: 'NAN' }
+  - { id: pm25, type: float, restore_value: no, initial_value: 'NAN' }
+  - { id: ozone, type: float, restore_value: no, initial_value: 'NAN' }
+  - { id: uv_index, type: float, restore_value: no, initial_value: 'NAN' }
+  - { id: air_updated, type: std::string, restore_value: no, initial_value: '"--"' }
+  - { id: nws_forecast_url, type: std::string, restore_value: no, initial_value: '""' }
+  - { id: forecast_0, type: std::string, restore_value: no, initial_value: '"Waiting for NWS forecast..."' }
+  - { id: forecast_1, type: std::string, restore_value: no, initial_value: '""' }
+  - { id: forecast_2, type: std::string, restore_value: no, initial_value: '""' }
+  - { id: forecast_3, type: std::string, restore_value: no, initial_value: '""' }
+  - { id: forecast_4, type: std::string, restore_value: no, initial_value: '""' }
+  - { id: forecast_5, type: std::string, restore_value: no, initial_value: '""' }
+  - { id: alert_count, type: int, restore_value: no, initial_value: '0' }
+  - { id: alert_event, type: std::string, restore_value: no, initial_value: '"No active NWS alerts"' }
+  - { id: alert_headline, type: std::string, restore_value: no, initial_value: '""' }
+  - { id: alert_description, type: std::string, restore_value: no, initial_value: '""' }
+  - { id: alert_severity, type: std::string, restore_value: no, initial_value: '""' }
+  - { id: radar_url_0, type: std::string, restore_value: no, initial_value: '""' }
+  - { id: radar_url_1, type: std::string, restore_value: no, initial_value: '""' }
+  - { id: radar_url_2, type: std::string, restore_value: no, initial_value: '""' }
+  - { id: radar_url_3, type: std::string, restore_value: no, initial_value: '""' }
+  - { id: radar_stamp, type: std::string, restore_value: no, initial_value: '"RADAR --"' }
+  # Four bits set only after all four successful image decodes.
+  - { id: radar_loaded_mask, type: uint8_t, restore_value: no, initial_value: '0' }
 
-  # Open-Meteo / CAMS air quality
-  - id: us_aqi
-    type: float
-    restore_value: no
-    initial_value: 'NAN'
-  - id: pm25
-    type: float
-    restore_value: no
-    initial_value: 'NAN'
-  - id: ozone
-    type: float
-    restore_value: no
-    initial_value: 'NAN'
-  - id: uv_index
-    type: float
-    restore_value: no
-    initial_value: 'NAN'
-  - id: air_updated
-    type: std::string
-    restore_value: no
-    initial_value: '"--"'
-
-  # NWS metadata / forecast
-  - id: nws_forecast_url
-    type: std::string
-    restore_value: no
-    initial_value: '""'
-  - id: forecast_0
-    type: std::string
-    restore_value: no
-    initial_value: '"Waiting for NWS forecast..."'
-  - id: forecast_1
-    type: std::string
-    restore_value: no
-    initial_value: '""'
-  - id: forecast_2
-    type: std::string
-    restore_value: no
-    initial_value: '""'
-  - id: forecast_3
-    type: std::string
-    restore_value: no
-    initial_value: '""'
-  - id: forecast_4
-    type: std::string
-    restore_value: no
-    initial_value: '""'
-  - id: forecast_5
-    type: std::string
-    restore_value: no
-    initial_value: '""'
-
-  # NWS alerts
-  - id: alert_count
-    type: int
-    restore_value: no
-    initial_value: '0'
-  - id: alert_event
-    type: std::string
-    restore_value: no
-    initial_value: '"No active NWS alerts"'
-  - id: alert_headline
-    type: std::string
-    restore_value: no
-    initial_value: '""'
-  - id: alert_description
-    type: std::string
-    restore_value: no
-    initial_value: '""'
-  - id: alert_severity
-    type: std::string
-    restore_value: no
-    initial_value: '""'
-
-  # RainViewer frame URLs / timestamp
-  - id: radar_url_0
-    type: std::string
-    restore_value: no
-    initial_value: '""'
-  - id: radar_url_1
-    type: std::string
-    restore_value: no
-    initial_value: '""'
-  - id: radar_url_2
-    type: std::string
-    restore_value: no
-    initial_value: '""'
-  - id: radar_url_3
-    type: std::string
-    restore_value: no
-    initial_value: '""'
-  - id: radar_stamp
-    type: std::string
-    restore_value: no
-    initial_value: '"RADAR --"'
-
-# -----------------------------------------------------------------------------
-# Images -- legacy/pre-2026.7 ESPHome schema
-# -----------------------------------------------------------------------------
-# Static basemap: downloaded at COMPILE TIME and embedded in firmware.
+# Static basemap is embedded at compile time (original pre-2026.7 schema).
 image:
   - id: basemap
     file: "https://maps.rainviewer.com/styles/m2_dark/static/${longitude},${latitude},${basemap_zoom}/512x512.png"
@@ -315,8 +170,8 @@ image:
     transparency: opaque
     resize: 480x480
 
-# Runtime radar images: downloaded by the ESP32 and replaced with the current
-# RainViewer frame URLs after the metadata request.
+# The dummy initial URLs never download because update_interval=never.
+# Actual frame URLs are installed together from the RainViewer API response.
 online_image:
   - id: radar_frame_0
     url: "https://tilecache.rainviewer.com/v2/coverage/0/512/${radar_zoom}/${latitude}/${longitude}/0/0_0.png"
@@ -327,6 +182,7 @@ online_image:
     update_interval: never
     buffer_size: 16384
     on_download_finished:
+      - lambda: id(radar_loaded_mask) |= 0x01;
       - component.update: radar_frame_1
     on_error:
       - logger.log: "Radar frame 0 failed"
@@ -341,6 +197,7 @@ online_image:
     update_interval: never
     buffer_size: 16384
     on_download_finished:
+      - lambda: id(radar_loaded_mask) |= 0x02;
       - component.update: radar_frame_2
     on_error:
       - logger.log: "Radar frame 1 failed"
@@ -355,6 +212,7 @@ online_image:
     update_interval: never
     buffer_size: 16384
     on_download_finished:
+      - lambda: id(radar_loaded_mask) |= 0x04;
       - component.update: radar_frame_3
     on_error:
       - logger.log: "Radar frame 2 failed"
@@ -369,18 +227,14 @@ online_image:
     update_interval: never
     buffer_size: 16384
     on_download_finished:
-      - lvgl.widget.hide: radar_loading_label
-      - lvgl.animimg.stop: radar_anim
-      - lvgl.animimg.start: radar_anim
+      - lambda: id(radar_loaded_mask) |= 0x08;
+      - script.execute: finish_radar
     on_error:
       - logger.log: "Radar frame 3 failed"
-      - lvgl.label.update:
-          id: radar_loading_label
-          text: "RADAR UPDATE ERROR"
-      - lvgl.widget.show: radar_loading_label
+      - script.execute: finish_radar
 
 # -----------------------------------------------------------------------------
-# Helper/update scripts
+# UI updates
 # -----------------------------------------------------------------------------
 script:
   - id: update_clock
@@ -396,8 +250,7 @@ script:
                   auto now = id(panel_time).now();
                   char buf[16];
                   now.strftime(buf, sizeof(buf), "%I:%M %p");
-                  if (buf[0] == '0') return std::string(buf + 1);
-                  return std::string(buf);
+                  return std::string(buf[0] == '0' ? buf + 1 : buf);
             - lvgl.label.update:
                 id: date_label
                 text: !lambda |-
@@ -409,7 +262,6 @@ script:
   - id: update_all_ui
     mode: restart
     then:
-      # Radar HUD: top
       - lvgl.label.update:
           id: radar_temp_label
           text: !lambda |-
@@ -435,8 +287,6 @@ script:
             else if (a > 100) q = "SENSITIVE";
             else if (a > 50) q = "MOD";
             char b[32]; snprintf(b, sizeof(b), "AQI %.0f %s", a, q); return std::string(b);
-
-      # Radar HUD: sides/bottom
       - lvgl.label.update:
           id: radar_wind_label
           text: !lambda |-
@@ -478,8 +328,6 @@ script:
       - lvgl.label.update:
           id: radar_time_label
           text: !lambda return id(radar_stamp);
-
-      # Conditions page
       - lvgl.label.update:
           id: conditions_primary_label
           text: !lambda |-
@@ -530,16 +378,12 @@ script:
               std::isfinite(id(ozone)) ? std::to_string(id(ozone)).substr(0,5).c_str() : "--",
               id(current_updated).c_str(), id(air_updated).c_str());
             return std::string(b);
-
-      # Forecast labels
       - lvgl.label.update: { id: fc_0, text: !lambda "return id(forecast_0);" }
       - lvgl.label.update: { id: fc_1, text: !lambda "return id(forecast_1);" }
       - lvgl.label.update: { id: fc_2, text: !lambda "return id(forecast_2);" }
       - lvgl.label.update: { id: fc_3, text: !lambda "return id(forecast_3);" }
       - lvgl.label.update: { id: fc_4, text: !lambda "return id(forecast_4);" }
       - lvgl.label.update: { id: fc_5, text: !lambda "return id(forecast_5);" }
-
-      # Alerts page + radar badge
       - if:
           condition:
             lambda: return id(alert_count) > 0;
@@ -569,7 +413,34 @@ script:
             - lvgl.label.update: { id: alert_headline_label, text: "" }
             - lvgl.label.update: { id: alert_description_label, text: "" }
 
-  # Open-Meteo current conditions
+  # Rebind image descriptors only after four successful PNG decodes.
+  # Keeping the animation hidden until then avoids LVGL reading empty images.
+  - id: finish_radar
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: return id(radar_loaded_mask) == 0x0F;
+          then:
+            - lvgl.animimg.update:
+                id: radar_anim
+                src: [radar_frame_0, radar_frame_1, radar_frame_2, radar_frame_3]
+                duration: 2400ms
+                repeat_count: forever
+                auto_start: true
+            - lvgl.widget.show: radar_anim
+            - lvgl.widget.hide: radar_loading_label
+            - logger.log: "All four radar frames loaded; animation started"
+          else:
+            - lvgl.label.update:
+                id: radar_loading_label
+                text: "RADAR UPDATE ERROR"
+            - lvgl.widget.show: radar_loading_label
+            - logger.log: "Incomplete radar download; animation remains hidden"
+
+  # ---------------------------------------------------------------------------
+  # Weather APIs
+  # ---------------------------------------------------------------------------
   - id: refresh_current_weather
     mode: restart
     then:
@@ -608,7 +479,6 @@ script:
                   id(wind_gust_mph) = c["wind_gusts_10m"] | NAN;
                   id(weather_code) = c["weather_code"] | -1;
                   id(current_updated) = std::string(c["time"] | "--");
-
                   int w = id(weather_code);
                   const char *desc = "Unknown";
                   if (w == 0) desc = "Clear";
@@ -630,7 +500,6 @@ script:
           on_error:
             - logger.log: "Open-Meteo current request failed"
 
-  # Open-Meteo Air Quality / CAMS
   - id: refresh_air_quality
     mode: restart
     then:
@@ -659,11 +528,6 @@ script:
           on_error:
             - logger.log: "Open-Meteo AQ request failed"
 
-  # Resolve NWS forecast URL from the exact point. The /points lookup and the
-  # forecast fetch are deliberately separate requests. Starting a second
-  # http_request from inside the first request's on_response callback can be
-  # unreliable on the ESP32, so refresh_nws_bundle serializes them with
-  # script.wait and a short gap between connections.
   - id: refresh_nws_points
     mode: restart
     then:
@@ -676,8 +540,7 @@ script:
           on_response:
             - lambda: |-
                 ESP_LOGI("weather", "NWS points status=%d duration=%u ms bytes=%u",
-                         response->status_code, response->duration_ms,
-                         (unsigned) body.size());
+                         response->status_code, response->duration_ms, (unsigned) body.size());
                 if (response->status_code != 200) {
                   ESP_LOGW("weather", "NWS points HTTP %d", response->status_code);
                   char b[80];
@@ -720,8 +583,7 @@ script:
                 on_response:
                   - lambda: |-
                       ESP_LOGI("weather", "NWS forecast status=%d duration=%u ms bytes=%u",
-                               response->status_code, response->duration_ms,
-                               (unsigned) body.size());
+                               response->status_code, response->duration_ms, (unsigned) body.size());
                       if (response->status_code != 200) {
                         ESP_LOGW("weather", "NWS forecast HTTP %d", response->status_code);
                         char b[80];
@@ -772,14 +634,9 @@ script:
                       id(forecast_0) = "NWS forecast network error";
                   - script.execute: update_all_ui
           else:
-            - lambda: |-
-                id(forecast_0) = "Waiting for NWS point lookup...";
+            - lambda: id(forecast_0) = "Waiting for NWS point lookup...";
             - script.execute: update_all_ui
 
-  # Normal forecast refresh. The NWS API itself recommends retry handling.
-  # Resolve the grid URL with bounded retries, then fetch the forecast. The
-  # direct /points URL already uses NWS's canonical 4-decimal coordinate form,
-  # avoiding the 301 redirect produced by over-precise coordinates.
   - id: refresh_nws_bundle
     mode: restart
     then:
@@ -811,8 +668,7 @@ script:
             - script.execute: refresh_forecast
             - script.wait: refresh_forecast
           else:
-            - lambda: |-
-                id(forecast_0) = "NWS forecast unavailable after 3 tries";
+            - lambda: id(forecast_0) = "NWS forecast unavailable after 3 tries";
             - script.execute: update_all_ui
 
   - id: refresh_alerts
@@ -827,8 +683,7 @@ script:
           on_response:
             - lambda: |-
                 ESP_LOGI("weather", "NWS alerts status=%d duration=%u ms bytes=%u",
-                         response->status_code, response->duration_ms,
-                         (unsigned) body.size());
+                         response->status_code, response->duration_ms, (unsigned) body.size());
                 if (response->status_code != 200) {
                   ESP_LOGW("weather", "NWS alerts HTTP %d", response->status_code);
                   return;
@@ -849,7 +704,6 @@ script:
                   id(alert_headline) = std::string(p["headline"] | "");
                   id(alert_severity) = std::string(p["severity"] | "");
                   std::string d = p["description"] | "";
-                  // Fit a useful amount on the small alerts page.
                   if (d.size() > 700) d = d.substr(0, 697) + "...";
                   id(alert_description) = d;
                   return true;
@@ -859,8 +713,7 @@ script:
           on_error:
             - logger.log: "NWS alerts request failed"
 
-  # RainViewer metadata -> newest four historical frames. Public API currently
-  # provides past radar only; no public future/nowcast frames.
+  # Discover the newest four past radar images and download them in sequence.
   - id: refresh_radar_metadata
     mode: restart
     then:
@@ -877,23 +730,24 @@ script:
                 bool ok = json::parse_json(body, [](JsonObject root) -> bool {
                   const char *host = root["host"] | "";
                   JsonArray past = root["radar"]["past"].as<JsonArray>();
-                  if (strlen(host)==0 || past.isNull() || past.size()==0) return false;
-
+                  if (strlen(host) == 0 || past.isNull() || past.size() == 0) return false;
                   size_t n = past.size();
                   size_t idx[4];
-                  if (n >= 4) { idx[0]=n-4; idx[1]=n-3; idx[2]=n-2; idx[3]=n-1; }
-                  else { idx[0]=0; idx[1]=n>1?1:0; idx[2]=n>2?2:n-1; idx[3]=n-1; }
-
+                  if (n >= 4) {
+                    idx[0]=n-4; idx[1]=n-3; idx[2]=n-2; idx[3]=n-1;
+                  } else {
+                    idx[0]=0; idx[1]=n>1?1:0; idx[2]=n>2?2:n-1; idx[3]=n-1;
+                  }
                   std::string urls[4];
-                  for (int i=0;i<4;i++) {
+                  for (int i=0; i<4; i++) {
                     const char *path = past[idx[i]]["path"] | "";
+                    if (strlen(path) == 0) return false;
                     urls[i] = std::string(host) + path + "/512/${radar_zoom}/${latitude}/${longitude}/${radar_color}/1_1.png";
                   }
                   id(radar_url_0)=urls[0];
                   id(radar_url_1)=urls[1];
                   id(radar_url_2)=urls[2];
                   id(radar_url_3)=urls[3];
-
                   time_t t = (time_t)(past[n-1]["time"] | 0);
                   if (t > 0) {
                     struct tm tmv;
@@ -901,7 +755,6 @@ script:
                     char tb[32];
                     strftime(tb, sizeof(tb), "RADAR %I:%M %p", &tmv);
                     std::string s(tb);
-                    // Remove leading zero after the space: "RADAR 05" -> "RADAR 5"
                     if (s.size() > 6 && s[6]=='0') s.erase(6,1);
                     id(radar_stamp)=s;
                   }
@@ -912,6 +765,10 @@ script:
                 condition:
                   lambda: return !id(radar_url_0).empty() && !id(radar_url_3).empty();
                 then:
+                  # Stop/hide BEFORE overwriting online-image buffers.
+                  - lvgl.animimg.stop: radar_anim
+                  - lvgl.widget.hide: radar_anim
+                  - lambda: id(radar_loaded_mask) = 0;
                   - online_image.set_url:
                       id: radar_frame_0
                       url: !lambda return id(radar_url_0);
@@ -937,37 +794,30 @@ script:
           on_error:
             - logger.log: "RainViewer metadata request failed"
 
-# -----------------------------------------------------------------------------
-# Refresh schedules
-# -----------------------------------------------------------------------------
+# Periodic refresh (unchanged).
 interval:
   - interval: 10min
     then:
       - script.execute: refresh_current_weather
-
   - interval: 15min
     then:
       - script.execute: refresh_air_quality
-
   - interval: 30min
     then:
       - script.execute: refresh_nws_bundle
-
   - interval: 2min
     then:
       - script.execute: refresh_alerts
-
   - interval: 5min
     then:
       - script.execute: refresh_radar_metadata
-
   - interval: 6h
     then:
       - lambda: id(nws_forecast_url).clear();
       - script.execute: refresh_nws_bundle
 
 # -----------------------------------------------------------------------------
-# Display / touch hardware retained from the original working panel
+# ST7701S + GT911 hardware (unchanged)
 # -----------------------------------------------------------------------------
 output:
   - platform: ledc
@@ -982,32 +832,15 @@ light:
     id: backlight
     restore_mode: ALWAYS_ON
 
-# Built-in ESPHome/LVGL Montserrat fonts: no external font file needed.
 font:
-  - file: "gfonts://Roboto"
-    id: roboto10
-    size: 10
-  - file: "gfonts://Roboto"
-    id: roboto12
-    size: 12
-  - file: "gfonts://Roboto"
-    id: roboto14
-    size: 14
-  - file: "gfonts://Roboto"
-    id: roboto16
-    size: 16
-  - file: "gfonts://Roboto"
-    id: roboto18
-    size: 18
-  - file: "gfonts://Roboto"
-    id: roboto22
-    size: 22
-  - file: "gfonts://Roboto"
-    id: roboto30
-    size: 30
-  - file: "gfonts://Roboto"
-    id: roboto42
-    size: 42
+  - { file: "gfonts://Roboto", id: roboto10, size: 10 }
+  - { file: "gfonts://Roboto", id: roboto12, size: 12 }
+  - { file: "gfonts://Roboto", id: roboto14, size: 14 }
+  - { file: "gfonts://Roboto", id: roboto16, size: 16 }
+  - { file: "gfonts://Roboto", id: roboto18, size: 18 }
+  - { file: "gfonts://Roboto", id: roboto22, size: 22 }
+  - { file: "gfonts://Roboto", id: roboto30, size: 30 }
+  - { file: "gfonts://Roboto", id: roboto42, size: 42 }
 
 i2c:
   - id: bus_a
@@ -1075,7 +908,6 @@ lvgl:
     - my_display
   touchscreens:
     - touchscreen_id: my_touchscreen
-
   on_idle:
     - timeout: 60s
       then:
@@ -1088,7 +920,6 @@ lvgl:
         - light.turn_off:
             id: backlight
             transition_length: 500ms
-
   theme:
     button:
       radius: 8
@@ -1096,12 +927,8 @@ lvgl:
       text_color: 0xFFFFFF
       text_font: roboto14
       shadow_width: 0
-
   page_wrap: true
   pages:
-    # -------------------------------------------------------------------------
-    # RADAR / WEATHER HUD
-    # -------------------------------------------------------------------------
     - id: radar_page
       skip: false
       bg_color: 0x05080C
@@ -1111,21 +938,17 @@ lvgl:
             src: basemap
             x: 0
             y: 0
-
+        # CRITICAL: At creation time only the embedded basemap exists.
+        # The online frames are assigned dynamically by finish_radar.
         - animimg:
             id: radar_anim
-            src:
-              - radar_frame_0
-              - radar_frame_1
-              - radar_frame_2
-              - radar_frame_3
+            src: [basemap]
             x: 0
             y: 0
             duration: 2400ms
             repeat_count: forever
-
-        # Home is EXACTLY at the coordinate-center of the basemap/radar image.
-        # Yellow remains obvious against the dark basemap and blue radar layer.
+            auto_start: false
+            hidden: true
         - obj:
             x: 233
             y: 233
@@ -1139,9 +962,6 @@ lvgl:
             clickable: false
             scrollable: false
             scrollbar_mode: "OFF"
-
-        # Top HUD. Explicitly disable scrolling on every HUD container: LVGL
-        # objects are scrollable by default, which caused the visible scrollbars.
         - obj:
             x: 8
             y: 8
@@ -1209,8 +1029,6 @@ lvgl:
                   text_color: 0xD6DCE2
                   text_align: right
                   long_mode: clip
-
-        # Left wind HUD
         - obj:
             x: 8
             y: 100
@@ -1245,8 +1063,6 @@ lvgl:
                   text_font: roboto14
                   text_color: 0xFFFFFF
                   long_mode: clip
-
-        # Right RH/dew/pressure HUD
         - obj:
             x: 352
             y: 100
@@ -1272,8 +1088,6 @@ lvgl:
                   text_font: roboto12
                   text_color: 0xFFFFFF
                   long_mode: clip
-
-        # Alert badge -- appears only when NWS returns active alerts.
         - button:
             id: alert_badge
             hidden: true
@@ -1299,7 +1113,6 @@ lvgl:
                   text_color: 0xFFFFFF
                   text_align: center
                   long_mode: clip
-
         - label:
             id: radar_loading_label
             x: 135
@@ -1317,9 +1130,6 @@ lvgl:
             pad_all: 8
             radius: 8
             long_mode: clip
-
-        # Bottom metric strip. Smaller fonts and fixed label heights prevent
-        # content from escaping its box; scrolling is disabled on the container.
         - obj:
             x: 8
             y: 362
@@ -1377,9 +1187,6 @@ lvgl:
                   text_align: right
                   long_mode: clip
 
-    # -------------------------------------------------------------------------
-    # NWS FORECAST
-    # -------------------------------------------------------------------------
     - id: forecast_page
       skip: false
       bg_color: 0x0B0F14
@@ -1391,106 +1198,13 @@ lvgl:
             text: "NWS FORECAST"
             text_font: roboto22
             text_color: 0xFFFFFF
-        - label:
-            id: fc_0
-            x: 12
-            y: 45
-            width: 456
-            height: 56
-            text: "Waiting for NWS forecast..."
-            text_font: roboto12
-            text_color: 0xFFFFFF
-            bg_color: 0x18202A
-            bg_opa: cover
-            pad_all: 8
-            radius: 7
-            long_mode: wrap
-            scrollable: false
-            scrollbar_mode: "OFF"
-        - label:
-            id: fc_1
-            x: 12
-            y: 106
-            width: 456
-            height: 56
-            text: ""
-            text_font: roboto12
-            text_color: 0xFFFFFF
-            bg_color: 0x18202A
-            bg_opa: cover
-            pad_all: 8
-            radius: 7
-            long_mode: wrap
-            scrollable: false
-            scrollbar_mode: "OFF"
-        - label:
-            id: fc_2
-            x: 12
-            y: 167
-            width: 456
-            height: 56
-            text: ""
-            text_font: roboto12
-            text_color: 0xFFFFFF
-            bg_color: 0x18202A
-            bg_opa: cover
-            pad_all: 8
-            radius: 7
-            long_mode: wrap
-            scrollable: false
-            scrollbar_mode: "OFF"
-        - label:
-            id: fc_3
-            x: 12
-            y: 228
-            width: 456
-            height: 56
-            text: ""
-            text_font: roboto12
-            text_color: 0xFFFFFF
-            bg_color: 0x18202A
-            bg_opa: cover
-            pad_all: 8
-            radius: 7
-            long_mode: wrap
-            scrollable: false
-            scrollbar_mode: "OFF"
-        - label:
-            id: fc_4
-            x: 12
-            y: 289
-            width: 456
-            height: 56
-            text: ""
-            text_font: roboto12
-            text_color: 0xFFFFFF
-            bg_color: 0x18202A
-            bg_opa: cover
-            pad_all: 8
-            radius: 7
-            long_mode: wrap
-            scrollable: false
-            scrollbar_mode: "OFF"
-        - label:
-            id: fc_5
-            x: 12
-            y: 350
-            width: 456
-            height: 56
-            text: ""
-            text_font: roboto12
-            text_color: 0xFFFFFF
-            bg_color: 0x18202A
-            bg_opa: cover
-            pad_all: 8
-            radius: 7
-            long_mode: wrap
-            scrollable: false
-            scrollbar_mode: "OFF"
+        - label: { id: fc_0, x: 12, y: 45, width: 456, height: 56, text: "Waiting for NWS forecast...", text_font: roboto12, text_color: 0xFFFFFF, bg_color: 0x18202A, bg_opa: cover, pad_all: 8, radius: 7, long_mode: wrap, scrollable: false, scrollbar_mode: "OFF" }
+        - label: { id: fc_1, x: 12, y: 106, width: 456, height: 56, text: "", text_font: roboto12, text_color: 0xFFFFFF, bg_color: 0x18202A, bg_opa: cover, pad_all: 8, radius: 7, long_mode: wrap, scrollable: false, scrollbar_mode: "OFF" }
+        - label: { id: fc_2, x: 12, y: 167, width: 456, height: 56, text: "", text_font: roboto12, text_color: 0xFFFFFF, bg_color: 0x18202A, bg_opa: cover, pad_all: 8, radius: 7, long_mode: wrap, scrollable: false, scrollbar_mode: "OFF" }
+        - label: { id: fc_3, x: 12, y: 228, width: 456, height: 56, text: "", text_font: roboto12, text_color: 0xFFFFFF, bg_color: 0x18202A, bg_opa: cover, pad_all: 8, radius: 7, long_mode: wrap, scrollable: false, scrollbar_mode: "OFF" }
+        - label: { id: fc_4, x: 12, y: 289, width: 456, height: 56, text: "", text_font: roboto12, text_color: 0xFFFFFF, bg_color: 0x18202A, bg_opa: cover, pad_all: 8, radius: 7, long_mode: wrap, scrollable: false, scrollbar_mode: "OFF" }
+        - label: { id: fc_5, x: 12, y: 350, width: 456, height: 56, text: "", text_font: roboto12, text_color: 0xFFFFFF, bg_color: 0x18202A, bg_opa: cover, pad_all: 8, radius: 7, long_mode: wrap, scrollable: false, scrollbar_mode: "OFF" }
 
-    # -------------------------------------------------------------------------
-    # CONDITIONS / AIR QUALITY
-    # -------------------------------------------------------------------------
     - id: conditions_page
       skip: false
       bg_color: 0x0B0F14
@@ -1539,9 +1253,6 @@ lvgl:
             scrollable: false
             scrollbar_mode: "OFF"
 
-    # -------------------------------------------------------------------------
-    # NWS ALERTS
-    # -------------------------------------------------------------------------
     - id: alerts_page
       skip: false
       bg_color: 0x0B0F14
@@ -1591,7 +1302,6 @@ lvgl:
             scrollable: false
             scrollbar_mode: "OFF"
 
-  # Global navigation always remains above all pages.
   top_layer:
     widgets:
       - obj:
